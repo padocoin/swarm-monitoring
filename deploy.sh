@@ -1,35 +1,31 @@
 #!/bin/bash
-set -e
 
-echo "=== Swarm Monitoring Full Auto Deployment ==="
+# =====================================
+# PadoCoin Swarm Monitoring Deployment
+# Manager: 192.168.0.3
+# Workers: 192.168.0.4, 192.168.0.5, 192.168.0.6
+# =====================================
 
-read -p "매니저 노드 IP/호스트명: " MANAGER
-read -p "워커 노드 1 IP/호스트명: " WORKER1
-read -p "워커 노드 2 IP/호스트명: " WORKER2
-read -p "워커 노드 3 IP/호스트명: " WORKER3
+# 서비스 이름
+STACK_NAME="pado_monitoring"
 
-NODES=("$MANAGER" "$WORKER1" "$WORKER2" "$WORKER3")
+# 워커 노드 리스트
+WORKERS=("192.168.0.4" "192.168.0.5" "192.168.0.6")
 
-TARGETS=""
-for NODE in "${NODES[@]}"; do
-  TARGETS="$TARGETS'$NODE:9323',"
+echo "🚀 [1/5] Git 업데이트 중..."
+git pull origin main || { echo "❌ Git pull 실패"; exit 1; }
+
+echo "🐳 [2/5] Docker 이미지 빌드 중..."
+docker build -t padocoin/monitoring:latest . || { echo "❌ 이미지 빌드 실패"; exit 1; }
+
+echo "📦 [3/5] 이미지 워커 노드로 전송 중..."
+for worker in "${WORKERS[@]}"; do
+  echo "➡️ 전송: $worker"
+  docker save padocoin/monitoring:latest | ssh root@$worker "docker load"
 done
-TARGETS=${TARGETS%,}
 
-cat > prometheus/prometheus.yml <<EOL
-global:
-  scrape_interval: 15s
+echo "🧩 [4/5] Stack 배포 중..."
+docker stack deploy -c docker-compose.yml $STACK_NAME || { echo "❌ 스택 배포 실패"; exit 1; }
 
-scrape_configs:
-  - job_name: 'docker'
-    static_configs:
-      - targets: [$TARGETS]
-EOL
-
-echo "✅ prometheus.yml 업데이트 완료"
-
-docker stack deploy -c docker-compose.yml monitoring
-echo "✅ Swarm Monitoring Stack 배포 완료"
-
-echo "Prometheus: http://$MANAGER:9090"
-echo "Grafana: http://$MANAGER:3000 (ID/Password: admin/admin)"
+echo "✅ [5/5] 배포 완료!"
+docker stack services $STACK_NAME
